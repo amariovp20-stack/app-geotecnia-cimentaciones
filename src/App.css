@@ -1,0 +1,135 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f4f7fb;
+  color: #1f2937;
+}
+
+.app-container {
+  max-width: 1250px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.main-title {
+  font-size: 32px;
+  margin-bottom: 6px;
+}
+
+.subtitle {
+  color: #4b5563;
+  margin-bottom: 24px;
+}
+
+.card {
+  background: white;
+  border: 1px solid #dbe3ee;
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 18px;
+}
+
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 18px;
+}
+
+.section {
+  margin-bottom: 24px;
+}
+
+input,
+select,
+button {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 14px;
+  background: white;
+}
+
+button {
+  background: #2563eb;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button:hover {
+  background: #1d4ed8;
+}
+
+.result-ok {
+  background: #ecfdf5;
+  border-left: 5px solid #10b981;
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.result-warn {
+  background: #fffbeb;
+  border-left: 5px solid #f59e0b;
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.result-bad {
+  background: #fef2f2;
+  border-left: 5px solid #ef4444;
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.mini-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.mini-card {
+  background: white;
+  border: 1px solid #dbe3ee;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+.mini-card h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: #475569;
+}
+
+.mini-card p {
+  margin: 0;
+  font-size: 22px;
+  font-weight: bold;
+}
+
+.chart-box {
+  background: white;
+  border: 1px solid #dbe3ee;
+  border-radius: 14px;
+  padding: 16px;
+  height: 340px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+@media (max-width: 900px) {
+  .grid-3,
+  .grid-4,
+  .mini-cards {
+    grid-template-columns: 1fr;
+  }
+}
