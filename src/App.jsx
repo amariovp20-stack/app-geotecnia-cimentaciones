@@ -16,6 +16,8 @@ import {
 import "./App.css";
 
 function App() {
+  const [tabActiva, setTabActiva] = useState("general");
+
   const [tipoCimentacion, setTipoCimentacion] = useState("zapata");
 
   const [B, setB] = useState(2.5);
@@ -40,6 +42,12 @@ function App() {
   const [fs, setFs] = useState(3);
   const [cargaDiseno, setCargaDiseno] = useState(900);
 
+  const [factorForma, setFactorForma] = useState(1);
+  const [factorProfundidad, setFactorProfundidad] = useState(1);
+
+  const [t1Sec, setT1Sec] = useState(1);
+  const [t2Sec, setT2Sec] = useState(10);
+
   const [estratos, setEstratos] = useState([
     {
       nombre: "Estrato 1",
@@ -47,9 +55,11 @@ function App() {
       Es: 10000,
       nu: 0.3,
       Cc: 0.25,
+      Cr: 0.05,
       e0: 0.8,
       sigma0: 40,
-      Cv: 0.001,
+      sigmaP: 80,
+      Calpha: 0.01,
       modelo: "ambos",
     },
     {
@@ -58,9 +68,11 @@ function App() {
       Es: 15000,
       nu: 0.3,
       Cc: 0.2,
+      Cr: 0.04,
       e0: 0.7,
       sigma0: 70,
-      Cv: 0.0012,
+      sigmaP: 120,
+      Calpha: 0.008,
       modelo: "ambos",
     },
     {
@@ -69,9 +81,11 @@ function App() {
       Es: 25000,
       nu: 0.28,
       Cc: 0.1,
+      Cr: 0.03,
       e0: 0.55,
       sigma0: 110,
-      Cv: 0.002,
+      sigmaP: 160,
+      Calpha: 0.005,
       modelo: "inmediato",
     },
   ]);
@@ -219,6 +233,47 @@ function App() {
     return qv / Math.pow(1 + z / Math.max(bv, 0.001), 2);
   };
 
+  const calcularAsentamientoInmediato = (delta, b, h, nu, Es) => {
+    return (
+      (delta * b * (1 - Math.pow(nu, 2)) / Math.max(Es, 0.0001)) *
+      (h / Math.max(b, 0.5)) *
+      Number(factorForma) *
+      Number(factorProfundidad)
+    );
+  };
+
+  const calcularConsolidacionPrimaria = (
+    sigma0,
+    sigmaP,
+    delta,
+    H,
+    Cc,
+    Cr,
+    e0
+  ) => {
+    const sigmaFinal = sigma0 + delta;
+
+    if (sigma0 >= sigmaP) {
+      return (Cc / (1 + e0)) * H * Math.log10(sigmaFinal / Math.max(sigma0, 1));
+    }
+
+    if (sigmaFinal <= sigmaP) {
+      return (Cr / (1 + e0)) * H * Math.log10(sigmaFinal / Math.max(sigma0, 1));
+    }
+
+    const parte1 =
+      (Cr / (1 + e0)) * H * Math.log10(sigmaP / Math.max(sigma0, 1));
+    const parte2 =
+      (Cc / (1 + e0)) * H * Math.log10(sigmaFinal / Math.max(sigmaP, 1));
+
+    return parte1 + parte2;
+  };
+
+  const calcularConsolidacionSecundaria = (H, Calpha, e0, t1, t2) => {
+    if (t2 <= t1 || t1 <= 0) return 0;
+    return (Calpha / (1 + e0)) * H * Math.log10(t2 / t1);
+  };
+
   const calcularResultados = (metodo) => {
     const b = dimensionesEquivalentes.Beq;
     const l = dimensionesEquivalentes.Leq;
@@ -226,7 +281,8 @@ function App() {
     const df = Number(Df);
 
     let Si = 0;
-    let Sc = 0;
+    let ScPrim = 0;
+    let ScSec = 0;
     let z = 0;
     const detalle = [];
 
@@ -243,27 +299,49 @@ function App() {
       const SiEstrato =
         e.modelo === "consolidacion"
           ? 0
-          : (delta * b * (1 - Math.pow(Number(e.nu), 2)) / Number(e.Es)) *
-            (h / Math.max(b, 0.5));
+          : calcularAsentamientoInmediato(
+              delta,
+              b,
+              h,
+              Number(e.nu),
+              Number(e.Es)
+            );
 
-      const ScEstrato =
+      const ScPrimEstrato =
         e.modelo === "inmediato"
           ? 0
-          : (Number(e.Cc) / (1 + Number(e.e0))) *
-            h *
-            Math.log10(
-              (Number(e.sigma0) + delta) / Math.max(Number(e.sigma0), 1)
+          : calcularConsolidacionPrimaria(
+              Number(e.sigma0),
+              Number(e.sigmaP),
+              delta,
+              h,
+              Number(e.Cc),
+              Number(e.Cr),
+              Number(e.e0)
+            );
+
+      const ScSecEstrato =
+        e.modelo === "inmediato"
+          ? 0
+          : calcularConsolidacionSecundaria(
+              h,
+              Number(e.Calpha),
+              Number(e.e0),
+              Number(t1Sec),
+              Number(t2Sec)
             );
 
       Si += Math.max(SiEstrato, 0);
-      Sc += Math.max(ScEstrato, 0);
+      ScPrim += Math.max(ScPrimEstrato, 0);
+      ScSec += Math.max(ScSecEstrato, 0);
 
       detalle.push({
         nombre: e.nombre,
         z: Number(zm.toFixed(2)),
         delta: Number(delta.toFixed(2)),
         Si: Number(SiEstrato.toFixed(5)),
-        Sc: Number(ScEstrato.toFixed(5)),
+        ScPrim: Number(ScPrimEstrato.toFixed(5)),
+        ScSec: Number(ScSecEstrato.toFixed(5)),
       });
 
       z += h;
@@ -271,19 +349,38 @@ function App() {
 
     return {
       Si,
-      Sc,
-      STotal: Si + Sc,
+      ScPrim,
+      ScSec,
+      STotal: Si + ScPrim + ScSec,
       detalle,
     };
   };
 
   const resultados21 = useMemo(() => {
     return calcularResultados("2:1");
-  }, [dimensionesEquivalentes, Df, capacidadPortante.qUsada, estratos]);
+  }, [
+    dimensionesEquivalentes,
+    Df,
+    capacidadPortante.qUsada,
+    estratos,
+    factorForma,
+    factorProfundidad,
+    t1Sec,
+    t2Sec,
+  ]);
 
   const resultadosB = useMemo(() => {
     return calcularResultados("Boussinesq");
-  }, [dimensionesEquivalentes, Df, capacidadPortante.qUsada, estratos]);
+  }, [
+    dimensionesEquivalentes,
+    Df,
+    capacidadPortante.qUsada,
+    estratos,
+    factorForma,
+    factorProfundidad,
+    t1Sec,
+    t2Sec,
+  ]);
 
   const estado21 = useMemo(() => {
     const s = resultados21.STotal * 1000;
@@ -335,13 +432,15 @@ function App() {
         s21: Number(
           (
             resultados21.Si * 1000 +
-            resultados21.Sc * 1000 * (t / tiempoMax)
+            resultados21.ScPrim * 1000 * (t / tiempoMax) +
+            resultados21.ScSec * 1000
           ).toFixed(2)
         ),
         sB: Number(
           (
             resultadosB.Si * 1000 +
-            resultadosB.Sc * 1000 * (t / tiempoMax)
+            resultadosB.ScPrim * 1000 * (t / tiempoMax) +
+            resultadosB.ScSec * 1000
           ).toFixed(2)
         ),
       });
@@ -368,10 +467,16 @@ function App() {
       resultadosB.STotal * 1000 > Number(limite)
     ) {
       lista.push(
-        "El asentamiento supera el límite admisible en al menos uno de los métodos. Se recomienda revisar dimensiones, presión aplicada o mejora del terreno."
+        "El asentamiento supera el límite admisible en al menos uno de los métodos."
       );
     } else {
       lista.push("El asentamiento calculado está dentro del rango admisible.");
+    }
+
+    if (resultados21.ScSec > 0 || resultadosB.ScSec > 0) {
+      lista.push(
+        "Existe componente de consolidación secundaria; conviene revisar el comportamiento a largo plazo."
+      );
     }
 
     if (tipoCimentacion === "grupo") {
@@ -397,7 +502,7 @@ function App() {
     const doc = new jsPDF();
 
     doc.setFontSize(16);
-    doc.text("Reporte de Asentamientos y Capacidad Portante", 14, 16);
+    doc.text("Reporte de Asentamientos Mejorado", 14, 16);
 
     autoTable(doc, {
       startY: 24,
@@ -409,10 +514,6 @@ function App() {
         ["q usada", `${capacidadPortante.qUsada.toFixed(2)} kPa`],
         ["B equivalente", `${dimensionesEquivalentes.Beq.toFixed(2)} m`],
         ["L equivalente", `${dimensionesEquivalentes.Leq.toFixed(2)} m`],
-        ["Área equivalente", `${dimensionesEquivalentes.area.toFixed(2)} m²`],
-        ["q_ult Terzaghi", `${capacidadPortante.qultTerzaghi.toFixed(2)} kPa`],
-        ["q_ult Meyerhof", `${capacidadPortante.qultMeyerhof.toFixed(2)} kPa`],
-        ["q_ult Hansen", `${capacidadPortante.qultHansen.toFixed(2)} kPa`],
         ["q admisible", `${capacidadPortante.qadmisible.toFixed(2)} kPa`],
         ["q/qadm", `${capacidadPortante.relacion.toFixed(3)}`],
       ],
@@ -421,409 +522,591 @@ function App() {
     autoTable(doc, {
       startY: doc.lastAutoTable.finalY + 8,
       head: [
-        ["Método", "S inmediato (mm)", "S consolidación (mm)", "S total (mm)", "Estado"],
+        [
+          "Método",
+          "S inmediato (mm)",
+          "S primario (mm)",
+          "S secundario (mm)",
+          "S total (mm)",
+          "Estado",
+        ],
       ],
       body: [
         [
           "2:1",
           (resultados21.Si * 1000).toFixed(2),
-          (resultados21.Sc * 1000).toFixed(2),
+          (resultados21.ScPrim * 1000).toFixed(2),
+          (resultados21.ScSec * 1000).toFixed(2),
           (resultados21.STotal * 1000).toFixed(2),
           estado21,
         ],
         [
           "Boussinesq",
           (resultadosB.Si * 1000).toFixed(2),
-          (resultadosB.Sc * 1000).toFixed(2),
+          (resultadosB.ScPrim * 1000).toFixed(2),
+          (resultadosB.ScSec * 1000).toFixed(2),
           (resultadosB.STotal * 1000).toFixed(2),
           estadoB,
         ],
       ],
     });
 
-    doc.save("reporte_capacidad_portante.pdf");
+    doc.save("reporte_asentamientos_profesional.pdf");
   };
 
   return (
-    <div className="app-container">
-      <h1 className="main-title">Calculadora de Asentamientos</h1>
-      <p className="subtitle">
-        Cimentaciones superficiales con comparación de métodos, tensión manual o
-        calculada y capacidad portante.
-      </p>
-
-      <div className="card section">
-        <h2>Datos generales</h2>
-        <div className="grid-3">
+    <div className="app-pro">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-dot"></div>
           <div>
-            <label>Tipo de cimentación</label>
-            <select
-              value={tipoCimentacion}
-              onChange={(e) => setTipoCimentacion(e.target.value)}
-            >
-              <option value="zapata">Zapata aislada</option>
-              <option value="grupo">Grupo de zapatas</option>
-              <option value="losa">Losa</option>
-            </select>
-          </div>
-
-          <div>
-            <label>B (m)</label>
-            <input type="number" value={B} onChange={(e) => setB(e.target.value)} />
-          </div>
-
-          <div>
-            <label>L (m)</label>
-            <input type="number" value={L} onChange={(e) => setL(e.target.value)} />
-          </div>
-
-          <div>
-            <label>Df (m)</label>
-            <input type="number" value={Df} onChange={(e) => setDf(e.target.value)} />
-          </div>
-
-          <div>
-            <label>q calculada (kPa)</label>
-            <input type="number" value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-
-          <div>
-            <label>Límite de asentamiento (mm)</label>
-            <input
-              type="number"
-              value={limite}
-              onChange={(e) => setLimite(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label>Tiempo (años)</label>
-            <input
-              type="number"
-              value={tiempo}
-              onChange={(e) => setTiempo(e.target.value)}
-            />
-          </div>
-        </div>
-      </div>
-
-      {tipoCimentacion === "grupo" && (
-        <div className="card section">
-          <h2>Configuración del grupo de zapatas</h2>
-          <div className="grid-4">
-            <div>
-              <label>Número de zapatas en X</label>
-              <input type="number" value={nx} onChange={(e) => setNx(e.target.value)} />
-            </div>
-
-            <div>
-              <label>Número de zapatas en Y</label>
-              <input type="number" value={ny} onChange={(e) => setNy(e.target.value)} />
-            </div>
-
-            <div>
-              <label>Separación Sx (m)</label>
-              <input type="number" value={sx} onChange={(e) => setSx(e.target.value)} />
-            </div>
-
-            <div>
-              <label>Separación Sy (m)</label>
-              <input type="number" value={sy} onChange={(e) => setSy(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="mini-cards" style={{ marginTop: 20 }}>
-            <div className="mini-card">
-              <h4>B equivalente</h4>
-              <p>{dimensionesEquivalentes.Beq.toFixed(2)} m</p>
-            </div>
-            <div className="mini-card">
-              <h4>L equivalente</h4>
-              <p>{dimensionesEquivalentes.Leq.toFixed(2)} m</p>
-            </div>
-            <div className="mini-card">
-              <h4>Área equivalente</h4>
-              <p>{dimensionesEquivalentes.area.toFixed(2)} m²</p>
-            </div>
-            <div className="mini-card">
-              <h4>Descripción</h4>
-              <p style={{ fontSize: 18 }}>{dimensionesEquivalentes.descripcion}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="card section">
-        <h2>Capacidad portante y tensión usada</h2>
-        <div className="grid-4">
-          <div>
-            <label>Método de capacidad portante</label>
-            <select
-              value={metodoCapacidad}
-              onChange={(e) => setMetodoCapacidad(e.target.value)}
-            >
-              <option value="terzaghi">Terzaghi</option>
-              <option value="meyerhof">Meyerhof</option>
-              <option value="hansen">Hansen</option>
-            </select>
-          </div>
-
-          <div>
-            <label>Modo de tensión</label>
-            <select value={modoTension} onChange={(e) => setModoTension(e.target.value)}>
-              <option value="calculada">Usar q calculada</option>
-              <option value="manual">Ingresar q manual</option>
-            </select>
-          </div>
-
-          <div>
-            <label>φ (grados)</label>
-            <input type="number" value={phi} onChange={(e) => setPhi(e.target.value)} />
-          </div>
-
-          <div>
-            <label>c (kPa)</label>
-            <input
-              type="number"
-              value={cohesion}
-              onChange={(e) => setCohesion(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label>γ (kN/m³)</label>
-            <input type="number" value={gamma} onChange={(e) => setGamma(e.target.value)} />
-          </div>
-
-          <div>
-            <label>FS</label>
-            <input type="number" value={fs} onChange={(e) => setFs(e.target.value)} />
-          </div>
-
-          <div>
-            <label>Carga de diseño (kN)</label>
-            <input
-              type="number"
-              value={cargaDiseno}
-              onChange={(e) => setCargaDiseno(e.target.value)}
-            />
-          </div>
-
-          {modoTension === "manual" && (
-            <div>
-              <label>Tensión manual q (kPa)</label>
-              <input
-                type="number"
-                value={qManual}
-                onChange={(e) => setQManual(e.target.value)}
-              />
-            </div>
-          )}
-        </div>
-
-        <div className="mini-cards" style={{ marginTop: 20 }}>
-          <div className="mini-card">
-            <h4>q admisible</h4>
-            <p>{capacidadPortante.qadmisible.toFixed(2)}</p>
-          </div>
-          <div className="mini-card">
-            <h4>q / qadm</h4>
-            <p>{capacidadPortante.relacion.toFixed(3)}</p>
-          </div>
-          <div className="mini-card">
-            <h4>Área requerida</h4>
-            <p>{capacidadPortante.areaReq.toFixed(2)}</p>
-          </div>
-          <div className="mini-card">
-            <h4>Lado equivalente</h4>
-            <p>{capacidadPortante.ladoEq.toFixed(2)}</p>
+            <h2>GeoSoft</h2>
+            <span>Cimentaciones superficiales</span>
           </div>
         </div>
 
-        <div className={obtenerClaseEstado(capacidadPortante.estado)} style={{ marginTop: 20 }}>
-          <strong>Estado de capacidad portante:</strong> {capacidadPortante.estado}
+        <button
+          className={`tab-btn ${tabActiva === "general" ? "active" : ""}`}
+          onClick={() => setTabActiva("general")}
+        >
+          Datos generales
+        </button>
+
+        <button
+          className={`tab-btn ${tabActiva === "capacidad" ? "active" : ""}`}
+          onClick={() => setTabActiva("capacidad")}
+        >
+          Capacidad portante
+        </button>
+
+        <button
+          className={`tab-btn ${tabActiva === "asentamiento" ? "active" : ""}`}
+          onClick={() => setTabActiva("asentamiento")}
+        >
+          Asentamientos
+        </button>
+
+        <button
+          className={`tab-btn ${tabActiva === "estratos" ? "active" : ""}`}
+          onClick={() => setTabActiva("estratos")}
+        >
+          Estratos
+        </button>
+
+        <button
+          className={`tab-btn ${tabActiva === "resultados" ? "active" : ""}`}
+          onClick={() => setTabActiva("resultados")}
+        >
+          Resultados
+        </button>
+
+        <button
+          className={`tab-btn ${tabActiva === "graficos" ? "active" : ""}`}
+          onClick={() => setTabActiva("graficos")}
+        >
+          Gráficos
+        </button>
+
+        <div className="sidebar-footer">
+          <button onClick={exportarPDF} className="primary-full">
+            Exportar PDF
+          </button>
+        </div>
+      </aside>
+
+      <main className="content">
+        <div className="hero-panel">
+          <div>
+            <h1>Calculadora de Asentamientos</h1>
+            <p>
+              Módulo profesional con capacidad portante, asentamiento inmediato
+              refinado, consolidación primaria y secundaria.
+            </p>
+          </div>
+
+          <div className="hero-badges">
+            <span>2:1</span>
+            <span>Boussinesq</span>
+            <span>Terzaghi</span>
+            <span>Meyerhof</span>
+            <span>Hansen</span>
+          </div>
         </div>
 
-        <div style={{ marginTop: 20 }}>
-          <p><b>Nq:</b> {capacidadPortante.Nq.toFixed(3)}</p>
-          <p><b>Nc:</b> {capacidadPortante.Nc.toFixed(3)}</p>
-          <p><b>Nγ:</b> {capacidadPortante.Ngamma.toFixed(3)}</p>
-          <p><b>q_ult Terzaghi:</b> {capacidadPortante.qultTerzaghi.toFixed(2)} kPa</p>
-          <p><b>q_ult Meyerhof:</b> {capacidadPortante.qultMeyerhof.toFixed(2)} kPa</p>
-          <p><b>q_ult Hansen:</b> {capacidadPortante.qultHansen.toFixed(2)} kPa</p>
-          <p><b>q usada en cálculos:</b> {capacidadPortante.qUsada.toFixed(2)} kPa</p>
+        <div className="stats-grid">
+          <div className="stat-card">
+            <small>q admisible</small>
+            <strong>{capacidadPortante.qadmisible.toFixed(2)} kPa</strong>
+          </div>
+          <div className="stat-card">
+            <small>q / qadm</small>
+            <strong>{capacidadPortante.relacion.toFixed(3)}</strong>
+          </div>
+          <div className="stat-card">
+            <small>S total 2:1</small>
+            <strong>{(resultados21.STotal * 1000).toFixed(2)} mm</strong>
+          </div>
+          <div className="stat-card">
+            <small>S total Boussinesq</small>
+            <strong>{(resultadosB.STotal * 1000).toFixed(2)} mm</strong>
+          </div>
         </div>
-      </div>
 
-      <div className="card section">
-        <h2>Estratos</h2>
+        {tabActiva === "general" && (
+          <>
+            <section className="panel">
+              <h3>Datos generales</h3>
+              <div className="grid3">
+                <div>
+                  <label>Tipo de cimentación</label>
+                  <select
+                    value={tipoCimentacion}
+                    onChange={(e) => setTipoCimentacion(e.target.value)}
+                  >
+                    <option value="zapata">Zapata aislada</option>
+                    <option value="grupo">Grupo de zapatas</option>
+                    <option value="losa">Losa</option>
+                  </select>
+                </div>
 
-        {estratos.map((e, i) => (
-          <div key={i} className="card section" style={{ marginBottom: 16 }}>
-            <h3>{e.nombre}</h3>
+                <div>
+                  <label>B (m)</label>
+                  <input type="number" value={B} onChange={(e) => setB(e.target.value)} />
+                </div>
 
-            <div className="grid-4">
-              <div>
-                <label>Nombre</label>
-                <input
-                  type="text"
-                  value={e.nombre}
-                  onChange={(ev) => actualizar(i, "nombre", ev.target.value)}
-                />
+                <div>
+                  <label>L (m)</label>
+                  <input type="number" value={L} onChange={(e) => setL(e.target.value)} />
+                </div>
+
+                <div>
+                  <label>Df (m)</label>
+                  <input type="number" value={Df} onChange={(e) => setDf(e.target.value)} />
+                </div>
+
+                <div>
+                  <label>q calculada (kPa)</label>
+                  <input type="number" value={q} onChange={(e) => setQ(e.target.value)} />
+                </div>
+
+                <div>
+                  <label>Límite de asentamiento (mm)</label>
+                  <input
+                    type="number"
+                    value={limite}
+                    onChange={(e) => setLimite(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label>Tiempo (años)</label>
+                  <input
+                    type="number"
+                    value={tiempo}
+                    onChange={(e) => setTiempo(e.target.value)}
+                  />
+                </div>
               </div>
+            </section>
 
-              <div>
-                <label>Espesor (m)</label>
-                <input
-                  type="number"
-                  value={e.espesor}
-                  onChange={(ev) => actualizar(i, "espesor", ev.target.value)}
-                />
-              </div>
+            {tipoCimentacion === "grupo" && (
+              <section className="panel">
+                <h3>Configuración del grupo de zapatas</h3>
+                <div className="grid4">
+                  <div>
+                    <label>Número de zapatas en X</label>
+                    <input
+                      type="number"
+                      value={nx}
+                      onChange={(e) => setNx(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label>Número de zapatas en Y</label>
+                    <input
+                      type="number"
+                      value={ny}
+                      onChange={(e) => setNy(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label>Separación Sx (m)</label>
+                    <input
+                      type="number"
+                      value={sx}
+                      onChange={(e) => setSx(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label>Separación Sy (m)</label>
+                    <input
+                      type="number"
+                      value={sy}
+                      onChange={(e) => setSy(e.target.value)}
+                    />
+                  </div>
+                </div>
 
-              <div>
-                <label>Es (kPa)</label>
-                <input
-                  type="number"
-                  value={e.Es}
-                  onChange={(ev) => actualizar(i, "Es", ev.target.value)}
-                />
-              </div>
+                <div className="chips-row">
+                  <span className="chip">B eq: {dimensionesEquivalentes.Beq.toFixed(2)} m</span>
+                  <span className="chip">L eq: {dimensionesEquivalentes.Leq.toFixed(2)} m</span>
+                  <span className="chip">Área: {dimensionesEquivalentes.area.toFixed(2)} m²</span>
+                  <span className="chip">{dimensionesEquivalentes.descripcion}</span>
+                </div>
+              </section>
+            )}
+          </>
+        )}
 
+        {tabActiva === "capacidad" && (
+          <section className="panel">
+            <h3>Capacidad portante</h3>
+            <div className="grid4">
               <div>
-                <label>ν</label>
-                <input
-                  type="number"
-                  value={e.nu}
-                  onChange={(ev) => actualizar(i, "nu", ev.target.value)}
-                />
-              </div>
-
-              <div>
-                <label>Cc</label>
-                <input
-                  type="number"
-                  value={e.Cc}
-                  onChange={(ev) => actualizar(i, "Cc", ev.target.value)}
-                />
-              </div>
-
-              <div>
-                <label>e0</label>
-                <input
-                  type="number"
-                  value={e.e0}
-                  onChange={(ev) => actualizar(i, "e0", ev.target.value)}
-                />
-              </div>
-
-              <div>
-                <label>σ'0</label>
-                <input
-                  type="number"
-                  value={e.sigma0}
-                  onChange={(ev) => actualizar(i, "sigma0", ev.target.value)}
-                />
-              </div>
-
-              <div>
-                <label>Cv</label>
-                <input
-                  type="number"
-                  value={e.Cv}
-                  onChange={(ev) => actualizar(i, "Cv", ev.target.value)}
-                />
-              </div>
-
-              <div>
-                <label>Modelo</label>
+                <label>Método de capacidad portante</label>
                 <select
-                  value={e.modelo}
-                  onChange={(ev) => actualizar(i, "modelo", ev.target.value)}
+                  value={metodoCapacidad}
+                  onChange={(e) => setMetodoCapacidad(e.target.value)}
                 >
-                  <option value="inmediato">Solo inmediato</option>
-                  <option value="consolidacion">Solo consolidación</option>
-                  <option value="ambos">Ambos</option>
+                  <option value="terzaghi">Terzaghi</option>
+                  <option value="meyerhof">Meyerhof</option>
+                  <option value="hansen">Hansen</option>
                 </select>
               </div>
+
+              <div>
+                <label>Modo de tensión</label>
+                <select
+                  value={modoTension}
+                  onChange={(e) => setModoTension(e.target.value)}
+                >
+                  <option value="calculada">Usar q calculada</option>
+                  <option value="manual">Ingresar q manual</option>
+                </select>
+              </div>
+
+              <div>
+                <label>φ (grados)</label>
+                <input type="number" value={phi} onChange={(e) => setPhi(e.target.value)} />
+              </div>
+
+              <div>
+                <label>c (kPa)</label>
+                <input
+                  type="number"
+                  value={cohesion}
+                  onChange={(e) => setCohesion(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label>γ (kN/m³)</label>
+                <input
+                  type="number"
+                  value={gamma}
+                  onChange={(e) => setGamma(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label>FS</label>
+                <input type="number" value={fs} onChange={(e) => setFs(e.target.value)} />
+              </div>
+
+              <div>
+                <label>Carga de diseño (kN)</label>
+                <input
+                  type="number"
+                  value={cargaDiseno}
+                  onChange={(e) => setCargaDiseno(e.target.value)}
+                />
+              </div>
+
+              {modoTension === "manual" && (
+                <div>
+                  <label>Tensión manual q (kPa)</label>
+                  <input
+                    type="number"
+                    value={qManual}
+                    onChange={(e) => setQManual(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
-          </div>
-        ))}
-      </div>
 
-      <div className="mini-cards section">
-        <div className="mini-card">
-          <h4>S total 2:1</h4>
-          <p>{(resultados21.STotal * 1000).toFixed(2)} mm</p>
-        </div>
-        <div className="mini-card">
-          <h4>S total Boussinesq</h4>
-          <p>{(resultadosB.STotal * 1000).toFixed(2)} mm</p>
-        </div>
-        <div className="mini-card">
-          <h4>Estado 2:1</h4>
-          <p style={{ fontSize: 18 }}>{estado21}</p>
-        </div>
-        <div className="mini-card">
-          <h4>Estado Boussinesq</h4>
-          <p style={{ fontSize: 18 }}>{estadoB}</p>
-        </div>
-      </div>
+            <div className="info-grid">
+              <div className="info-card"><span>Nq</span><strong>{capacidadPortante.Nq.toFixed(3)}</strong></div>
+              <div className="info-card"><span>Nc</span><strong>{capacidadPortante.Nc.toFixed(3)}</strong></div>
+              <div className="info-card"><span>Nγ</span><strong>{capacidadPortante.Ngamma.toFixed(3)}</strong></div>
+              <div className="info-card"><span>q usada</span><strong>{capacidadPortante.qUsada.toFixed(2)}</strong></div>
+              <div className="info-card"><span>q ult Terzaghi</span><strong>{capacidadPortante.qultTerzaghi.toFixed(2)}</strong></div>
+              <div className="info-card"><span>q ult Meyerhof</span><strong>{capacidadPortante.qultMeyerhof.toFixed(2)}</strong></div>
+              <div className="info-card"><span>q ult Hansen</span><strong>{capacidadPortante.qultHansen.toFixed(2)}</strong></div>
+              <div className="info-card"><span>Área requerida</span><strong>{capacidadPortante.areaReq.toFixed(2)}</strong></div>
+            </div>
 
-      <div className={obtenerClaseEstado(estado21)} style={{ marginBottom: 12 }}>
-        <strong>Control de asentamiento 2:1:</strong> {estado21}
-      </div>
+            <div className={obtenerClaseEstado(capacidadPortante.estado)}>
+              <strong>Estado de capacidad portante:</strong> {capacidadPortante.estado}
+            </div>
+          </section>
+        )}
 
-      <div className={obtenerClaseEstado(estadoB)} style={{ marginBottom: 24 }}>
-        <strong>Control de asentamiento Boussinesq:</strong> {estadoB}
-      </div>
+        {tabActiva === "asentamiento" && (
+          <section className="panel">
+            <h3>Parámetros de asentamiento</h3>
+            <div className="grid4">
+              <div>
+                <label>Factor de forma</label>
+                <input
+                  type="number"
+                  value={factorForma}
+                  onChange={(e) => setFactorForma(e.target.value)}
+                />
+              </div>
 
-      <div className="card section">
-        <h2>Recomendaciones automáticas</h2>
-        {recomendaciones.map((r, i) => (
-          <div key={i} style={{ marginBottom: 10 }}>
-            {i + 1}. {r}
-          </div>
-        ))}
-      </div>
+              <div>
+                <label>Factor de profundidad</label>
+                <input
+                  type="number"
+                  value={factorProfundidad}
+                  onChange={(e) => setFactorProfundidad(e.target.value)}
+                />
+              </div>
 
-      <div className="section">
-        <button onClick={exportarPDF}>Exportar PDF</button>
-      </div>
+              <div>
+                <label>t1 secundaria</label>
+                <input
+                  type="number"
+                  value={t1Sec}
+                  onChange={(e) => setT1Sec(e.target.value)}
+                />
+              </div>
 
-      <div className="section">
-        <h2>Bulbo de presiones</h2>
-        <div className="chart-box">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={bulbo}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="z" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Area dataKey="m21" name="2:1" />
-              <Area dataKey="mb" name="Boussinesq" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+              <div>
+                <label>t2 secundaria</label>
+                <input
+                  type="number"
+                  value={t2Sec}
+                  onChange={(e) => setT2Sec(e.target.value)}
+                />
+              </div>
+            </div>
 
-      <div className="section">
-        <h2>Asentamiento vs tiempo</h2>
-        <div className="chart-box">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={tiempoData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="t" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line dataKey="s21" name="2:1" />
-              <Line dataKey="sB" name="Boussinesq" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+            <div className="info-grid">
+              <div className="info-card"><span>S inmediata 2:1</span><strong>{(resultados21.Si * 1000).toFixed(2)} mm</strong></div>
+              <div className="info-card"><span>S primaria 2:1</span><strong>{(resultados21.ScPrim * 1000).toFixed(2)} mm</strong></div>
+              <div className="info-card"><span>S secundaria 2:1</span><strong>{(resultados21.ScSec * 1000).toFixed(2)} mm</strong></div>
+              <div className="info-card"><span>S total 2:1</span><strong>{(resultados21.STotal * 1000).toFixed(2)} mm</strong></div>
+              <div className="info-card"><span>S inmediata Bouss.</span><strong>{(resultadosB.Si * 1000).toFixed(2)} mm</strong></div>
+              <div className="info-card"><span>S primaria Bouss.</span><strong>{(resultadosB.ScPrim * 1000).toFixed(2)} mm</strong></div>
+              <div className="info-card"><span>S secundaria Bouss.</span><strong>{(resultadosB.ScSec * 1000).toFixed(2)} mm</strong></div>
+              <div className="info-card"><span>S total Bouss.</span><strong>{(resultadosB.STotal * 1000).toFixed(2)} mm</strong></div>
+            </div>
+
+            <div className={obtenerClaseEstado(estado21)}>
+              <strong>Control 2:1:</strong> {estado21}
+            </div>
+
+            <div className={obtenerClaseEstado(estadoB)}>
+              <strong>Control Boussinesq:</strong> {estadoB}
+            </div>
+          </section>
+        )}
+
+        {tabActiva === "estratos" && (
+          <section className="panel">
+            <h3>Estratos</h3>
+            {estratos.map((e, i) => (
+              <div key={i} className="soil-card">
+                <div className="soil-header">
+                  <h4>{e.nombre}</h4>
+                  <span>Estrato {i + 1}</span>
+                </div>
+
+                <div className="grid4">
+                  <div>
+                    <label>Nombre</label>
+                    <input
+                      type="text"
+                      value={e.nombre}
+                      onChange={(ev) => actualizar(i, "nombre", ev.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label>Espesor (m)</label>
+                    <input
+                      type="number"
+                      value={e.espesor}
+                      onChange={(ev) => actualizar(i, "espesor", ev.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label>Es (kPa)</label>
+                    <input
+                      type="number"
+                      value={e.Es}
+                      onChange={(ev) => actualizar(i, "Es", ev.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label>ν</label>
+                    <input
+                      type="number"
+                      value={e.nu}
+                      onChange={(ev) => actualizar(i, "nu", ev.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label>Cc</label>
+                    <input
+                      type="number"
+                      value={e.Cc}
+                      onChange={(ev) => actualizar(i, "Cc", ev.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label>Cr</label>
+                    <input
+                      type="number"
+                      value={e.Cr}
+                      onChange={(ev) => actualizar(i, "Cr", ev.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label>e0</label>
+                    <input
+                      type="number"
+                      value={e.e0}
+                      onChange={(ev) => actualizar(i, "e0", ev.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label>σ'0</label>
+                    <input
+                      type="number"
+                      value={e.sigma0}
+                      onChange={(ev) => actualizar(i, "sigma0", ev.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label>σ'p</label>
+                    <input
+                      type="number"
+                      value={e.sigmaP}
+                      onChange={(ev) => actualizar(i, "sigmaP", ev.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label>Cα</label>
+                    <input
+                      type="number"
+                      value={e.Calpha}
+                      onChange={(ev) => actualizar(i, "Calpha", ev.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label>Modelo</label>
+                    <select
+                      value={e.modelo}
+                      onChange={(ev) => actualizar(i, "modelo", ev.target.value)}
+                    >
+                      <option value="inmediato">Solo inmediato</option>
+                      <option value="consolidacion">Solo consolidación</option>
+                      <option value="ambos">Ambos</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {tabActiva === "resultados" && (
+          <>
+            <section className="panel">
+              <h3>Resumen de resultados</h3>
+              <div className="stats-grid">
+                <div className="stat-card">
+                  <small>S total 2:1</small>
+                  <strong>{(resultados21.STotal * 1000).toFixed(2)} mm</strong>
+                </div>
+                <div className="stat-card">
+                  <small>S total Boussinesq</small>
+                  <strong>{(resultadosB.STotal * 1000).toFixed(2)} mm</strong>
+                </div>
+                <div className="stat-card">
+                  <small>S secundaria 2:1</small>
+                  <strong>{(resultados21.ScSec * 1000).toFixed(2)} mm</strong>
+                </div>
+                <div className="stat-card">
+                  <small>S secundaria Bouss.</small>
+                  <strong>{(resultadosB.ScSec * 1000).toFixed(2)} mm</strong>
+                </div>
+              </div>
+            </section>
+
+            <section className="panel">
+              <h3>Recomendaciones automáticas</h3>
+              <div className="recommendation-list">
+                {recomendaciones.map((r, i) => (
+                  <div key={i} className="recommendation-item">
+                    <span>{i + 1}</span>
+                    <p>{r}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
+
+        {tabActiva === "graficos" && (
+          <>
+            <section className="panel">
+              <h3>Bulbo de presiones</h3>
+              <div className="chart-box">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={bulbo}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="z" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Area dataKey="m21" name="2:1" />
+                    <Area dataKey="mb" name="Boussinesq" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+
+            <section className="panel">
+              <h3>Asentamiento vs tiempo</h3>
+              <div className="chart-box">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={tiempoData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="t" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line dataKey="s21" name="2:1" />
+                    <Line dataKey="sB" name="Boussinesq" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+          </>
+        )}
+      </main>
     </div>
   );
 }
