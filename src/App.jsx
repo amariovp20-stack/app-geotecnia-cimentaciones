@@ -13,6 +13,7 @@ import {
   Area,
   Legend,
 } from "recharts";
+import Plot from "react-plotly.js";
 import "./App.css";
 
 function App() {
@@ -47,6 +48,8 @@ function App() {
 
   const [t1Sec, setT1Sec] = useState(1);
   const [t2Sec, setT2Sec] = useState(10);
+
+  const [metodo3D, setMetodo3D] = useState("2:1");
 
   const [estratos, setEstratos] = useState([
     {
@@ -225,13 +228,10 @@ function App() {
     metodoCapacidad,
   ]);
 
-  const sigma21 = (qv, bv, lv, z) => {
-    return qv * (bv * lv) / ((bv + z) * (lv + z));
-  };
+  const sigma21 = (qv, bv, lv, z) => qv * (bv * lv) / ((bv + z) * (lv + z));
 
-  const sigmaB = (qv, bv, lv, z) => {
-    return qv / Math.pow(1 + z / Math.max(bv, 0.001), 2);
-  };
+  const sigmaB = (qv, bv, lv, z) =>
+    qv / Math.pow(1 + z / Math.max(bv, 0.001), 2);
 
   const calcularAsentamientoInmediato = (delta, b, h, nu, Es) => {
     return (
@@ -356,31 +356,35 @@ function App() {
     };
   };
 
-  const resultados21 = useMemo(() => {
-    return calcularResultados("2:1");
-  }, [
-    dimensionesEquivalentes,
-    Df,
-    capacidadPortante.qUsada,
-    estratos,
-    factorForma,
-    factorProfundidad,
-    t1Sec,
-    t2Sec,
-  ]);
+  const resultados21 = useMemo(
+    () => calcularResultados("2:1"),
+    [
+      dimensionesEquivalentes,
+      Df,
+      capacidadPortante.qUsada,
+      estratos,
+      factorForma,
+      factorProfundidad,
+      t1Sec,
+      t2Sec,
+    ]
+  );
 
-  const resultadosB = useMemo(() => {
-    return calcularResultados("Boussinesq");
-  }, [
-    dimensionesEquivalentes,
-    Df,
-    capacidadPortante.qUsada,
-    estratos,
-    factorForma,
-    factorProfundidad,
-    t1Sec,
-    t2Sec,
-  ]);
+  const resultadosB = useMemo(
+    () => calcularResultados("Boussinesq"),
+    [
+      dimensionesEquivalentes,
+      Df,
+      capacidadPortante.qUsada,
+      estratos,
+      factorForma,
+      factorProfundidad,
+      t1Sec,
+      t2Sec,
+    ]
+  );
+
+  const resultadosMetodo3D = metodo3D === "2:1" ? resultados21 : resultadosB;
 
   const estado21 = useMemo(() => {
     const s = resultados21.STotal * 1000;
@@ -449,6 +453,270 @@ function App() {
     return arr;
   }, [resultados21, resultadosB, tiempo]);
 
+  const bulbo3D = useMemo(() => {
+    const b = dimensionesEquivalentes.Beq;
+    const l = dimensionesEquivalentes.Leq;
+    const qn = capacidadPortante.qUsada;
+
+    const nivelesProfundidad = 18;
+    const puntosAngulo = 48;
+
+    const x = [];
+    const y = [];
+    const z = [];
+    const color = [];
+    const texto = [];
+
+    const zMax = Math.max(2.5 * Math.max(b, l), 6);
+
+    for (let i = 0; i < nivelesProfundidad; i++) {
+      const profundidad = (zMax * i) / (nivelesProfundidad - 1);
+
+      const filaX = [];
+      const filaY = [];
+      const filaZ = [];
+      const filaColor = [];
+      const filaTexto = [];
+
+      const sigmaCentro =
+        metodo3D === "2:1"
+          ? sigma21(qn, b, l, Math.max(profundidad, 0.001))
+          : sigmaB(qn, b, l, Math.max(profundidad, 0.001));
+
+      const factorProf = Math.exp(-1.15 * profundidad / Math.max(b, 0.001));
+      const radioX = (b * 0.55) * factorProf + 0.12 * b;
+      const radioY = (l * 0.55) * factorProf + 0.12 * l;
+
+      for (let j = 0; j < puntosAngulo; j++) {
+        const theta = (2 * Math.PI * j) / (puntosAngulo - 1);
+
+        const xi = radioX * Math.cos(theta);
+        const yi = radioY * Math.sin(theta);
+
+        filaX.push(Number(xi.toFixed(3)));
+        filaY.push(Number(yi.toFixed(3)));
+        filaZ.push(Number(profundidad.toFixed(3)));
+        filaColor.push(Number(sigmaCentro.toFixed(2)));
+        filaTexto.push(
+          `X: ${xi.toFixed(2)} m<br>` +
+            `Y: ${yi.toFixed(2)} m<br>` +
+            `Profundidad: ${profundidad.toFixed(2)} m<br>` +
+            `Δσ: ${sigmaCentro.toFixed(2)} kPa<br>` +
+            `Método: ${metodo3D}`
+        );
+      }
+
+      x.push(filaX);
+      y.push(filaY);
+      z.push(filaZ);
+      color.push(filaColor);
+      texto.push(filaTexto);
+    }
+
+    return { x, y, z, color, texto };
+  }, [dimensionesEquivalentes, capacidadPortante.qUsada, metodo3D]);
+
+  const asentamiento3D = useMemo(() => {
+    const b = dimensionesEquivalentes.Beq;
+    const l = dimensionesEquivalentes.Leq;
+    const sMax = Math.max(resultadosMetodo3D.STotal * 1000, 0.001);
+
+    const nivelesProfundidad = 18;
+    const puntosAngulo = 48;
+
+    const x = [];
+    const y = [];
+    const z = [];
+    const color = [];
+    const texto = [];
+
+    const zMax = Math.max(2.5 * Math.max(b, l), 6);
+
+    for (let i = 0; i < nivelesProfundidad; i++) {
+      const profundidad = (zMax * i) / (nivelesProfundidad - 1);
+
+      const filaX = [];
+      const filaY = [];
+      const filaZ = [];
+      const filaColor = [];
+      const filaTexto = [];
+
+      const factorProf = Math.exp(-1.1 * profundidad / Math.max(b, 0.001));
+      const radioX = (b * 0.5) * factorProf + 0.1 * b;
+      const radioY = (l * 0.5) * factorProf + 0.1 * l;
+
+      const deformacionCentro =
+        sMax * Math.exp(-1.25 * profundidad / Math.max(b, 0.001));
+
+      for (let j = 0; j < puntosAngulo; j++) {
+        const theta = (2 * Math.PI * j) / (puntosAngulo - 1);
+
+        const xi = radioX * Math.cos(theta);
+        const yi = radioY * Math.sin(theta);
+
+        filaX.push(Number(xi.toFixed(3)));
+        filaY.push(Number(yi.toFixed(3)));
+        filaZ.push(Number(profundidad.toFixed(3)));
+        filaColor.push(Number(deformacionCentro.toFixed(3)));
+        filaTexto.push(
+          `X: ${xi.toFixed(2)} m<br>` +
+            `Y: ${yi.toFixed(2)} m<br>` +
+            `Profundidad: ${profundidad.toFixed(2)} m<br>` +
+            `Deformación: ${deformacionCentro.toFixed(3)} mm<br>` +
+            `Método: ${metodo3D}`
+        );
+      }
+
+      x.push(filaX);
+      y.push(filaY);
+      z.push(filaZ);
+      color.push(filaColor);
+      texto.push(filaTexto);
+    }
+
+    return { x, y, z, color, texto };
+  }, [dimensionesEquivalentes, resultadosMetodo3D, metodo3D]);
+
+  const trazasCimentacion3D = useMemo(() => {
+    const trazas = [];
+    const b = Number(B);
+    const l = Number(L);
+
+    const crearRectanguloRelleno = (
+      cx,
+      cy,
+      ancho,
+      largo,
+      nombre,
+      colorLinea = "#111827",
+      colorRelleno = "rgba(37,99,235,0.35)"
+    ) => {
+      const x1 = cx - ancho / 2;
+      const x2 = cx + ancho / 2;
+      const y1 = cy - largo / 2;
+      const y2 = cy + largo / 2;
+
+      const placa = {
+        type: "mesh3d",
+        x: [x1, x2, x2, x1],
+        y: [y1, y1, y2, y2],
+        z: [0, 0, 0, 0],
+        i: [0, 0],
+        j: [1, 2],
+        k: [2, 3],
+        opacity: 0.45,
+        color: colorRelleno,
+        flatshading: true,
+        hovertemplate:
+          `${nombre}<br>` +
+          `Centro X: ${cx.toFixed(2)} m<br>` +
+          `Centro Y: ${cy.toFixed(2)} m<br>` +
+          `Ancho: ${ancho.toFixed(2)} m<br>` +
+          `Largo: ${largo.toFixed(2)} m<br>` +
+          `Profundidad: 0.00 m<extra></extra>`,
+        name: nombre,
+        showlegend: false,
+      };
+
+      const borde = {
+        type: "scatter3d",
+        mode: "lines",
+        x: [x1, x2, x2, x1, x1],
+        y: [y1, y1, y2, y2, y1],
+        z: [0, 0, 0, 0, 0],
+        line: {
+          color: colorLinea,
+          width: 6,
+        },
+        hovertemplate:
+          `${nombre}<br>` +
+          `X: %{x:.2f} m<br>` +
+          `Y: %{y:.2f} m<br>` +
+          `Profundidad: 0.00 m<extra></extra>`,
+        name: `${nombre} borde`,
+        showlegend: false,
+      };
+
+      return [placa, borde];
+    };
+
+    if (tipoCimentacion === "grupo") {
+      const nX = Math.max(Number(nx), 1);
+      const nY = Math.max(Number(ny), 1);
+      const sepX = Number(sx);
+      const sepY = Number(sy);
+
+      const anchoTotal = nX * b + (nX - 1) * sepX;
+      const largoTotal = nY * l + (nY - 1) * sepY;
+
+      const x0 = -anchoTotal / 2 + b / 2;
+      const y0 = -largoTotal / 2 + l / 2;
+
+      for (let ix = 0; ix < nX; ix++) {
+        for (let iy = 0; iy < nY; iy++) {
+          const cx = x0 + ix * (b + sepX);
+          const cy = y0 + iy * (l + sepY);
+
+          trazas.push(
+            ...crearRectanguloRelleno(
+              cx,
+              cy,
+              b,
+              l,
+              `Zapata ${ix + 1}-${iy + 1}`,
+              "#111827",
+              "rgba(37,99,235,0.35)"
+            )
+          );
+        }
+      }
+
+      trazas.push({
+        type: "scatter3d",
+        mode: "lines",
+        x: [
+          -anchoTotal / 2,
+          anchoTotal / 2,
+          anchoTotal / 2,
+          -anchoTotal / 2,
+          -anchoTotal / 2,
+        ],
+        y: [
+          -largoTotal / 2,
+          -largoTotal / 2,
+          largoTotal / 2,
+          largoTotal / 2,
+          -largoTotal / 2,
+        ],
+        z: [0, 0, 0, 0, 0],
+        line: {
+          color: "#dc2626",
+          width: 4,
+          dash: "dash",
+        },
+        hovertemplate:
+          `Área equivalente del grupo<br>` +
+          `X: %{x:.2f} m<br>` +
+          `Y: %{y:.2f} m<br>` +
+          `Profundidad: 0.00 m<extra></extra>`,
+        name: "Área equivalente",
+        showlegend: false,
+      });
+    } else {
+      const nombre = tipoCimentacion === "losa" ? "Losa" : "Zapata";
+      const colorRelleno =
+        tipoCimentacion === "losa"
+          ? "rgba(16,185,129,0.35)"
+          : "rgba(37,99,235,0.35)";
+
+      trazas.push(
+        ...crearRectanguloRelleno(0, 0, b, l, nombre, "#111827", colorRelleno)
+      );
+    }
+
+    return trazas;
+  }, [tipoCimentacion, B, L, nx, ny, sx, sy]);
+
   const recomendaciones = useMemo(() => {
     const lista = [];
 
@@ -502,7 +770,7 @@ function App() {
     const doc = new jsPDF();
 
     doc.setFontSize(16);
-    doc.text("Reporte de Asentamientos Mejorado", 14, 16);
+    doc.text("Reporte de Asentamientos Profesional", 14, 16);
 
     autoTable(doc, {
       startY: 24,
@@ -565,46 +833,26 @@ function App() {
           </div>
         </div>
 
-        <button
-          className={`tab-btn ${tabActiva === "general" ? "active" : ""}`}
-          onClick={() => setTabActiva("general")}
-        >
+        <button className={`tab-btn ${tabActiva === "general" ? "active" : ""}`} onClick={() => setTabActiva("general")}>
           Datos generales
         </button>
-
-        <button
-          className={`tab-btn ${tabActiva === "capacidad" ? "active" : ""}`}
-          onClick={() => setTabActiva("capacidad")}
-        >
+        <button className={`tab-btn ${tabActiva === "capacidad" ? "active" : ""}`} onClick={() => setTabActiva("capacidad")}>
           Capacidad portante
         </button>
-
-        <button
-          className={`tab-btn ${tabActiva === "asentamiento" ? "active" : ""}`}
-          onClick={() => setTabActiva("asentamiento")}
-        >
-          Asentamientos
-        </button>
-
-        <button
-          className={`tab-btn ${tabActiva === "estratos" ? "active" : ""}`}
-          onClick={() => setTabActiva("estratos")}
-        >
+        <button className={`tab-btn ${tabActiva === "estratos" ? "active" : ""}`} onClick={() => setTabActiva("estratos")}>
           Estratos
         </button>
-
-        <button
-          className={`tab-btn ${tabActiva === "resultados" ? "active" : ""}`}
-          onClick={() => setTabActiva("resultados")}
-        >
+        <button className={`tab-btn ${tabActiva === "asentamiento" ? "active" : ""}`} onClick={() => setTabActiva("asentamiento")}>
+          Asentamientos
+        </button>
+        <button className={`tab-btn ${tabActiva === "resultados" ? "active" : ""}`} onClick={() => setTabActiva("resultados")}>
           Resultados
         </button>
-
-        <button
-          className={`tab-btn ${tabActiva === "graficos" ? "active" : ""}`}
-          onClick={() => setTabActiva("graficos")}
-        >
-          Gráficos
+        <button className={`tab-btn ${tabActiva === "graficos" ? "active" : ""}`} onClick={() => setTabActiva("graficos")}>
+          Gráficos 2D
+        </button>
+        <button className={`tab-btn ${tabActiva === "graficos3d" ? "active" : ""}`} onClick={() => setTabActiva("graficos3d")}>
+          Gráficos 3D
         </button>
 
         <div className="sidebar-footer">
@@ -619,8 +867,8 @@ function App() {
           <div>
             <h1>Calculadora de Asentamientos</h1>
             <p>
-              Módulo profesional con capacidad portante, asentamiento inmediato
-              refinado, consolidación primaria y secundaria.
+              Módulo profesional con capacidad portante, asentamiento inmediato refinado,
+              consolidación primaria, secundaria y visualización 3D.
             </p>
           </div>
 
@@ -630,6 +878,7 @@ function App() {
             <span>Terzaghi</span>
             <span>Meyerhof</span>
             <span>Hansen</span>
+            <span>3D</span>
           </div>
         </div>
 
@@ -659,52 +908,35 @@ function App() {
               <div className="grid3">
                 <div>
                   <label>Tipo de cimentación</label>
-                  <select
-                    value={tipoCimentacion}
-                    onChange={(e) => setTipoCimentacion(e.target.value)}
-                  >
+                  <select value={tipoCimentacion} onChange={(e) => setTipoCimentacion(e.target.value)}>
                     <option value="zapata">Zapata aislada</option>
                     <option value="grupo">Grupo de zapatas</option>
                     <option value="losa">Losa</option>
                   </select>
                 </div>
-
                 <div>
                   <label>B (m)</label>
                   <input type="number" value={B} onChange={(e) => setB(e.target.value)} />
                 </div>
-
                 <div>
                   <label>L (m)</label>
                   <input type="number" value={L} onChange={(e) => setL(e.target.value)} />
                 </div>
-
                 <div>
                   <label>Df (m)</label>
                   <input type="number" value={Df} onChange={(e) => setDf(e.target.value)} />
                 </div>
-
                 <div>
                   <label>q calculada (kPa)</label>
                   <input type="number" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
-
                 <div>
                   <label>Límite de asentamiento (mm)</label>
-                  <input
-                    type="number"
-                    value={limite}
-                    onChange={(e) => setLimite(e.target.value)}
-                  />
+                  <input type="number" value={limite} onChange={(e) => setLimite(e.target.value)} />
                 </div>
-
                 <div>
                   <label>Tiempo (años)</label>
-                  <input
-                    type="number"
-                    value={tiempo}
-                    onChange={(e) => setTiempo(e.target.value)}
-                  />
+                  <input type="number" value={tiempo} onChange={(e) => setTiempo(e.target.value)} />
                 </div>
               </div>
             </section>
@@ -715,35 +947,19 @@ function App() {
                 <div className="grid4">
                   <div>
                     <label>Número de zapatas en X</label>
-                    <input
-                      type="number"
-                      value={nx}
-                      onChange={(e) => setNx(e.target.value)}
-                    />
+                    <input type="number" value={nx} onChange={(e) => setNx(e.target.value)} />
                   </div>
                   <div>
                     <label>Número de zapatas en Y</label>
-                    <input
-                      type="number"
-                      value={ny}
-                      onChange={(e) => setNy(e.target.value)}
-                    />
+                    <input type="number" value={ny} onChange={(e) => setNy(e.target.value)} />
                   </div>
                   <div>
                     <label>Separación Sx (m)</label>
-                    <input
-                      type="number"
-                      value={sx}
-                      onChange={(e) => setSx(e.target.value)}
-                    />
+                    <input type="number" value={sx} onChange={(e) => setSx(e.target.value)} />
                   </div>
                   <div>
                     <label>Separación Sy (m)</label>
-                    <input
-                      type="number"
-                      value={sy}
-                      onChange={(e) => setSy(e.target.value)}
-                    />
+                    <input type="number" value={sy} onChange={(e) => setSy(e.target.value)} />
                   </div>
                 </div>
 
@@ -764,72 +980,43 @@ function App() {
             <div className="grid4">
               <div>
                 <label>Método de capacidad portante</label>
-                <select
-                  value={metodoCapacidad}
-                  onChange={(e) => setMetodoCapacidad(e.target.value)}
-                >
+                <select value={metodoCapacidad} onChange={(e) => setMetodoCapacidad(e.target.value)}>
                   <option value="terzaghi">Terzaghi</option>
                   <option value="meyerhof">Meyerhof</option>
                   <option value="hansen">Hansen</option>
                 </select>
               </div>
-
               <div>
                 <label>Modo de tensión</label>
-                <select
-                  value={modoTension}
-                  onChange={(e) => setModoTension(e.target.value)}
-                >
+                <select value={modoTension} onChange={(e) => setModoTension(e.target.value)}>
                   <option value="calculada">Usar q calculada</option>
                   <option value="manual">Ingresar q manual</option>
                 </select>
               </div>
-
               <div>
                 <label>φ (grados)</label>
                 <input type="number" value={phi} onChange={(e) => setPhi(e.target.value)} />
               </div>
-
               <div>
                 <label>c (kPa)</label>
-                <input
-                  type="number"
-                  value={cohesion}
-                  onChange={(e) => setCohesion(e.target.value)}
-                />
+                <input type="number" value={cohesion} onChange={(e) => setCohesion(e.target.value)} />
               </div>
-
               <div>
                 <label>γ (kN/m³)</label>
-                <input
-                  type="number"
-                  value={gamma}
-                  onChange={(e) => setGamma(e.target.value)}
-                />
+                <input type="number" value={gamma} onChange={(e) => setGamma(e.target.value)} />
               </div>
-
               <div>
                 <label>FS</label>
                 <input type="number" value={fs} onChange={(e) => setFs(e.target.value)} />
               </div>
-
               <div>
                 <label>Carga de diseño (kN)</label>
-                <input
-                  type="number"
-                  value={cargaDiseno}
-                  onChange={(e) => setCargaDiseno(e.target.value)}
-                />
+                <input type="number" value={cargaDiseno} onChange={(e) => setCargaDiseno(e.target.value)} />
               </div>
-
               {modoTension === "manual" && (
                 <div>
                   <label>Tensión manual q (kPa)</label>
-                  <input
-                    type="number"
-                    value={qManual}
-                    onChange={(e) => setQManual(e.target.value)}
-                  />
+                  <input type="number" value={qManual} onChange={(e) => setQManual(e.target.value)} />
                 </div>
               )}
             </div>
@@ -851,44 +1038,90 @@ function App() {
           </section>
         )}
 
+        {tabActiva === "estratos" && (
+          <section className="panel">
+            <h3>Estratos</h3>
+            {estratos.map((e, i) => (
+              <div key={i} className="soil-card">
+                <div className="soil-header">
+                  <h4>{e.nombre}</h4>
+                  <span>Estrato {i + 1}</span>
+                </div>
+
+                <div className="grid4">
+                  <div>
+                    <label>Nombre</label>
+                    <input type="text" value={e.nombre} onChange={(ev) => actualizar(i, "nombre", ev.target.value)} />
+                  </div>
+                  <div>
+                    <label>Espesor (m)</label>
+                    <input type="number" value={e.espesor} onChange={(ev) => actualizar(i, "espesor", ev.target.value)} />
+                  </div>
+                  <div>
+                    <label>Es (kPa)</label>
+                    <input type="number" value={e.Es} onChange={(ev) => actualizar(i, "Es", ev.target.value)} />
+                  </div>
+                  <div>
+                    <label>ν</label>
+                    <input type="number" value={e.nu} onChange={(ev) => actualizar(i, "nu", ev.target.value)} />
+                  </div>
+                  <div>
+                    <label>Cc</label>
+                    <input type="number" value={e.Cc} onChange={(ev) => actualizar(i, "Cc", ev.target.value)} />
+                  </div>
+                  <div>
+                    <label>Cr</label>
+                    <input type="number" value={e.Cr} onChange={(ev) => actualizar(i, "Cr", ev.target.value)} />
+                  </div>
+                  <div>
+                    <label>e0</label>
+                    <input type="number" value={e.e0} onChange={(ev) => actualizar(i, "e0", ev.target.value)} />
+                  </div>
+                  <div>
+                    <label>σ'0</label>
+                    <input type="number" value={e.sigma0} onChange={(ev) => actualizar(i, "sigma0", ev.target.value)} />
+                  </div>
+                  <div>
+                    <label>σ'p</label>
+                    <input type="number" value={e.sigmaP} onChange={(ev) => actualizar(i, "sigmaP", ev.target.value)} />
+                  </div>
+                  <div>
+                    <label>Cα</label>
+                    <input type="number" value={e.Calpha} onChange={(ev) => actualizar(i, "Calpha", ev.target.value)} />
+                  </div>
+                  <div>
+                    <label>Modelo</label>
+                    <select value={e.modelo} onChange={(ev) => actualizar(i, "modelo", ev.target.value)}>
+                      <option value="inmediato">Solo inmediato</option>
+                      <option value="consolidacion">Solo consolidación</option>
+                      <option value="ambos">Ambos</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+
         {tabActiva === "asentamiento" && (
           <section className="panel">
             <h3>Parámetros de asentamiento</h3>
             <div className="grid4">
               <div>
                 <label>Factor de forma</label>
-                <input
-                  type="number"
-                  value={factorForma}
-                  onChange={(e) => setFactorForma(e.target.value)}
-                />
+                <input type="number" value={factorForma} onChange={(e) => setFactorForma(e.target.value)} />
               </div>
-
               <div>
                 <label>Factor de profundidad</label>
-                <input
-                  type="number"
-                  value={factorProfundidad}
-                  onChange={(e) => setFactorProfundidad(e.target.value)}
-                />
+                <input type="number" value={factorProfundidad} onChange={(e) => setFactorProfundidad(e.target.value)} />
               </div>
-
               <div>
                 <label>t1 secundaria</label>
-                <input
-                  type="number"
-                  value={t1Sec}
-                  onChange={(e) => setT1Sec(e.target.value)}
-                />
+                <input type="number" value={t1Sec} onChange={(e) => setT1Sec(e.target.value)} />
               </div>
-
               <div>
                 <label>t2 secundaria</label>
-                <input
-                  type="number"
-                  value={t2Sec}
-                  onChange={(e) => setT2Sec(e.target.value)}
-                />
+                <input type="number" value={t2Sec} onChange={(e) => setT2Sec(e.target.value)} />
               </div>
             </div>
 
@@ -910,124 +1143,6 @@ function App() {
             <div className={obtenerClaseEstado(estadoB)}>
               <strong>Control Boussinesq:</strong> {estadoB}
             </div>
-          </section>
-        )}
-
-        {tabActiva === "estratos" && (
-          <section className="panel">
-            <h3>Estratos</h3>
-            {estratos.map((e, i) => (
-              <div key={i} className="soil-card">
-                <div className="soil-header">
-                  <h4>{e.nombre}</h4>
-                  <span>Estrato {i + 1}</span>
-                </div>
-
-                <div className="grid4">
-                  <div>
-                    <label>Nombre</label>
-                    <input
-                      type="text"
-                      value={e.nombre}
-                      onChange={(ev) => actualizar(i, "nombre", ev.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>Espesor (m)</label>
-                    <input
-                      type="number"
-                      value={e.espesor}
-                      onChange={(ev) => actualizar(i, "espesor", ev.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>Es (kPa)</label>
-                    <input
-                      type="number"
-                      value={e.Es}
-                      onChange={(ev) => actualizar(i, "Es", ev.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>ν</label>
-                    <input
-                      type="number"
-                      value={e.nu}
-                      onChange={(ev) => actualizar(i, "nu", ev.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>Cc</label>
-                    <input
-                      type="number"
-                      value={e.Cc}
-                      onChange={(ev) => actualizar(i, "Cc", ev.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>Cr</label>
-                    <input
-                      type="number"
-                      value={e.Cr}
-                      onChange={(ev) => actualizar(i, "Cr", ev.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>e0</label>
-                    <input
-                      type="number"
-                      value={e.e0}
-                      onChange={(ev) => actualizar(i, "e0", ev.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>σ'0</label>
-                    <input
-                      type="number"
-                      value={e.sigma0}
-                      onChange={(ev) => actualizar(i, "sigma0", ev.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>σ'p</label>
-                    <input
-                      type="number"
-                      value={e.sigmaP}
-                      onChange={(ev) => actualizar(i, "sigmaP", ev.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>Cα</label>
-                    <input
-                      type="number"
-                      value={e.Calpha}
-                      onChange={(ev) => actualizar(i, "Calpha", ev.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>Modelo</label>
-                    <select
-                      value={e.modelo}
-                      onChange={(ev) => actualizar(i, "modelo", ev.target.value)}
-                    >
-                      <option value="inmediato">Solo inmediato</option>
-                      <option value="consolidacion">Solo consolidación</option>
-                      <option value="ambos">Ambos</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            ))}
           </section>
         )}
 
@@ -1102,6 +1217,119 @@ function App() {
                     <Line dataKey="sB" name="Boussinesq" />
                   </LineChart>
                 </ResponsiveContainer>
+              </div>
+            </section>
+          </>
+        )}
+
+        {tabActiva === "graficos3d" && (
+          <>
+            <section className="panel">
+              <h3>Configuración 3D</h3>
+              <div className="grid3">
+                <div>
+                  <label>Método para visualización 3D</label>
+                  <select value={metodo3D} onChange={(e) => setMetodo3D(e.target.value)}>
+                    <option value="2:1">2:1</option>
+                    <option value="boussinesq">Boussinesq</option>
+                  </select>
+                </div>
+              </div>
+            </section>
+
+            <section className="panel">
+              <h3>Bulbo de presiones 3D</h3>
+              <div className="chart-box chart-box-3d">
+                <Plot
+                  data={[
+                    {
+                      type: "surface",
+                      x: bulbo3D.x,
+                      y: bulbo3D.y,
+                      z: bulbo3D.z,
+                      surfacecolor: bulbo3D.color,
+                      text: bulbo3D.texto,
+                      hovertemplate: "%{text}<extra></extra>",
+                      colorscale: "Jet",
+                      showscale: true,
+                      contours: {
+                        z: {
+                          show: true,
+                          usecolormap: true,
+                          highlightcolor: "#111827",
+                          project: { z: true },
+                        },
+                      },
+                    },
+                    ...trazasCimentacion3D,
+                  ]}
+                  layout={{
+                    autosize: true,
+                    margin: { l: 0, r: 0, b: 0, t: 35 },
+                    title: "Bulbo de presiones 3D",
+                    scene: {
+                      xaxis: { title: "X (m)" },
+                      yaxis: { title: "Y (m)" },
+                      zaxis: {
+                        title: "Profundidad (m)",
+                        autorange: "reversed",
+                      },
+                      camera: {
+                        eye: { x: 1.6, y: 1.5, z: 1.1 },
+                      },
+                    },
+                  }}
+                  style={{ width: "100%", height: "100%" }}
+                  config={{ responsive: true }}
+                />
+              </div>
+            </section>
+
+            <section className="panel">
+              <h3>Asentamiento 3D en profundidad</h3>
+              <div className="chart-box chart-box-3d">
+                <Plot
+                  data={[
+                    {
+                      type: "surface",
+                      x: asentamiento3D.x,
+                      y: asentamiento3D.y,
+                      z: asentamiento3D.z,
+                      surfacecolor: asentamiento3D.color,
+                      text: asentamiento3D.texto,
+                      hovertemplate: "%{text}<extra></extra>",
+                      colorscale: "Viridis",
+                      showscale: true,
+                      contours: {
+                        z: {
+                          show: true,
+                          usecolormap: true,
+                          highlightcolor: "#111827",
+                          project: { z: true },
+                        },
+                      },
+                    },
+                    ...trazasCimentacion3D,
+                  ]}
+                  layout={{
+                    autosize: true,
+                    margin: { l: 0, r: 0, b: 0, t: 35 },
+                    title: "Asentamiento 3D en profundidad",
+                    scene: {
+                      xaxis: { title: "X (m)" },
+                      yaxis: { title: "Y (m)" },
+                      zaxis: {
+                        title: "Profundidad (m)",
+                        autorange: "reversed",
+                      },
+                      camera: {
+                        eye: { x: 1.7, y: 1.4, z: 1.15 },
+                      },
+                    },
+                  }}
+                  style={{ width: "100%", height: "100%" }}
+                  config={{ responsive: true }}
+                />
               </div>
             </section>
           </>

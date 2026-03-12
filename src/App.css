@@ -120,6 +120,7 @@ p {
   border-radius: 12px;
   font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.18);
 }
 
 .primary-full:hover {
@@ -392,6 +393,10 @@ select:focus {
   height: 380px;
 }
 
+.chart-box-3d {
+  height: 560px;
+}
+
 @media (max-width: 1200px) {
   .stats-grid,
   .info-grid,
@@ -437,5 +442,9 @@ select:focus {
 
   .chart-box {
     height: 320px;
+  }
+
+  .chart-box-3d {
+    height: 420px;
   }
 }

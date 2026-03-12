@@ -12,8 +12,10 @@
   "dependencies": {
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.7",
+    "plotly.js": "^3.4.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-plotly.js": "^2.6.0",
     "recharts": "^3.8.0"
   },
   "devDependencies": {
